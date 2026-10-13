@@ -7,13 +7,19 @@ import { z } from "zod";
 
 const UUID = z.string().uuid();
 
+
+//defining what data my API is accepting
 const UpdateQuotationInput = z.object({
   expectedRevision: z.number().int().positive().max(2_147_483_646),
   customerName: z.string().trim().min(1).max(200),
-  // Keep cents as a safe JS integer at the API boundary. PostgreSQL BIGINT
-  // values are returned as strings by node-postgres to avoid precision loss.
   amountCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 }).strict();
+
+
+
+
+
+// standard OOPS programming pattern
 
 export class AppError extends Error {
   constructor(
@@ -25,7 +31,7 @@ export class AppError extends Error {
     this.name = new.target.name;
   }
 }
-
+//Instead of throwing generic errors everywhere, This service defines clear error categories.
 export class ValidationError extends AppError {
   constructor(message: string) {
     super(message, 400, "VALIDATION_ERROR");
@@ -41,6 +47,8 @@ export class ConflictError extends AppError {
     super("Quotation changed; reload the latest revision before editing", 409, "REVISION_CONFLICT");
   }
 }
+
+//An interface defines the expected shape of an object in TypeScript
 
 export interface Quotation {
   id: string;
@@ -71,8 +79,6 @@ async function rollbackQuietly(client: PoolClient): Promise<void> {
   try {
     await client.query("ROLLBACK");
   } catch {
-    // Do not mask the original error. Configure pool/client error monitoring
-    // so rollback failures and broken connections remain observable.
   }
 }
 
@@ -99,9 +105,6 @@ export class QuotationService {
     try {
       await client.query("BEGIN");
       transactionStarted = true;
-
-      // Atomic compare-and-swap: concurrent requests with the same expected
-      // revision cannot both advance the same row.
       const result = await client.query<DbQuotation>(
         `UPDATE quotations
             SET customer_name = $1,
@@ -115,8 +118,7 @@ export class QuotationService {
       );
 
       if (result.rowCount !== 1) {
-        // This extra query is deliberately on the conflict path only: it
-        // distinguishes 404 from 409 without adding work to successful updates.
+    
         const exists = await client.query(
           "SELECT 1 FROM quotations WHERE id = $1",
           [parsedId.data],
@@ -127,7 +129,6 @@ export class QuotationService {
 
       const updated = result.rows[0];
 
-      // The history row and current state must commit or roll back together.
       await client.query(
         `INSERT INTO quotation_revisions
            (quotation_id, revision, customer_name, amount_cents)
